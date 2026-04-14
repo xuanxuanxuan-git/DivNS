@@ -1,0 +1,10 @@
+# conda install pytorch==1.7.0 torchvision==0.8.0 torchaudio==0.7.0 -c pytorch
+# pytorch == 1.7.0
+numpy == 1.20.2
+scipy
+scikit-learn 
+prettytable == 2.1.0
+tqdm==4.66.4
+pandas
+# wandb==0.17.0
+matplotlib
