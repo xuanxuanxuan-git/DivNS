@@ -67,6 +67,6 @@ print("Sampled before squeezing:", sampled_before, "Avg Sim Before:", similarity
 print("Sampled after squeezing:", sampled_after, "Avg Sim After:", similarity_after)
 
 if similarity_after < similarity_before:
-    print(f"✅ Success: The method reduced similarity (↓ {similarity_before - similarity_after:.4f})")
+    print(f"The method reduced similarity (↓ {similarity_before - similarity_after:.4f})")
 else:
-    print("⚠️ Warning: The squeezing did not reduce similarity as expected.")
+    print("The squeezing did not reduce similarity as expected.")
