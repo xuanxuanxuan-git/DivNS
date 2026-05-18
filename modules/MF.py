@@ -67,7 +67,6 @@ class MF(nn.Module):
 
         mf_loss = torch.mean(torch.log(1+torch.exp(neg_scores - pos_scores.unsqueeze(dim=1)).sum(dim=1)))
 
-        # TODO: BCE loss, SSM loss
         # bce_loss = torch.log(torch.exp(neg_scores)/(1+torch.exp(neg_scores))) + torch.log(1+torch.exp(-pos_scores)) # not sure if we should take the average
         # ssm_loss = torch.mean(torch.log(torch.exp(pos_scores)/ torch.exp(pos_scores)+torch.exp(neg_scores).sum(dim=1)))
 
@@ -75,7 +74,6 @@ class MF(nn.Module):
         regularize = (torch.norm(user_embed[:, :]) ** 2
                        + torch.norm(pos_item_embed[:, :]) ** 2
                        + torch.norm(neg_item_embed[:, :]) ** 2) / 2  # take hop=0
-        # TODO: for ncf etc., reg term should also add FC and W weight (maybe not)
         emb_loss = self.l2 * regularize / batch_size
         return mf_loss + emb_loss, pos_scores.detach(), neg_scores.detach()
 
@@ -152,15 +150,11 @@ class MF(nn.Module):
         if cur_epoch == 0:
             return neg_item_embs
         
-        if self.dataset=="ml-1m":
-            cached_negs_embs = neg_item_embs    # comment out if not testing
-        else:
-            cached_neg_indices = torch.stack([self.recycle_negs_idx[u.item()][0] for u in user_id])
+        cached_neg_indices = torch.stack([self.recycle_negs_idx[u.item()][0] for u in user_id])
 
-            for u in user_id:
-                self.recycle_negs_idx[u.item()] = self.recycle_negs_idx[u.item()][1:]
-            cached_negs_embs = all_item_embs[cached_neg_indices]  # [batch_size, 1, emb_dim]          # comment back
-        # cached_negs_embs = all_item_embs[cached_neg_indices].unsqueeze(1)  # [batch_size, 1, emb_dim]
+        for u in user_id:
+            self.recycle_negs_idx[u.item()] = self.recycle_negs_idx[u.item()][1:]
+        cached_negs_embs = all_item_embs[cached_neg_indices]  # [batch_size, 1, emb_dim]          
 
         # Weighted combination
         weight_1 = 0.8
@@ -349,47 +343,40 @@ class MF(nn.Module):
 
         cached_negs_ids = torch.stack(cached_negs_ids)
         cached_negs_ids = cached_negs_ids.view(-1)
-        perm = torch.randperm(len(cached_negs_ids), device=cached_negs_ids.device)
-        sampled_negs_ids = cached_negs_ids[perm[:num_inter]].tolist()
+
+        # select the set that is diverse from the chosen negs
+        all_item_embed = self.embedding_dict["item_emb"]
+        unique_cached_negs_ids = torch.unique(torch.cat(cached_negs_ids)) 
+        cached_item_embed = all_item_embed[unique_cached_negs_ids]
+        used_item_embed = all_item_embed[neg_item_ids]
         
-        # random.shuffle(cached_negs_ids)
-        # sampled_negs_ids = cached_negs_ids[:num_inter]
-
-        return sampled_negs_ids
-
-        # # select the set that is diverse from the chosen negs
-        # all_item_embed = self.embedding_dict["item_emb"]
-        # unique_cached_negs_ids = torch.unique(torch.cat(cached_negs_ids)) 
-        # cached_item_embed = all_item_embed[unique_cached_negs_ids]
-        # used_item_embed = all_item_embed[neg_item_ids]
+        # S = cosine_similarity_matrix(cached_item_embed)
+        S = rbf_kernel(cached_item_embed)
         
-        # # S = cosine_similarity_matrix(cached_item_embed)
-        # S = rbf_kernel(cached_item_embed)
-        
-        # # Compute average similarity to target set for each candidate
-        # similarity_to_target = torch.mean(
-        #     torch.mm(cached_item_embed, used_item_embed.T) / (torch.norm(cached_item_embed, dim=1, keepdim=True) * torch.norm(used_item_embed, dim=1) + 1e-8),
-        #     dim=1
-        # )
+        # Compute average similarity to target set for each candidate
+        similarity_to_target = torch.mean(
+            torch.mm(cached_item_embed, used_item_embed.T) / (torch.norm(cached_item_embed, dim=1, keepdim=True) * torch.norm(used_item_embed, dim=1) + 1e-8),
+            dim=1
+        )
 
-        # # Define re-weighting factor
-        # alpha = 1.0  # Controls strength of the penalty
-        # weights = 1 / (1 + alpha * similarity_to_target)
+        # Define re-weighting factor
+        alpha = 1.0  # Controls strength of the penalty
+        weights = 1 / (1 + alpha * similarity_to_target)
 
-        # # Re-weight the kernel
-        # K = torch.outer(weights, weights) * S
+        # Re-weight the kernel
+        K = torch.outer(weights, weights) * S
 
-        # # Sample using DPP
-        # dpp = FiniteDPP('likelihood', L=K.detach().numpy())
-        # dpp.sample_exact(k=num_inter)
-        # # Get selected indices
-        # sampled_negs_ids = dpp.list_of_samples[-1]
+        # Sample using DPP
+        dpp = FiniteDPP('likelihood', L=K.detach().numpy())
+        dpp.sample_exact(k=num_inter)
+        # Get selected indices
+        sampled_negs_ids = dpp.list_of_samples[-1]
 
-        # if not sampled_negs_ids:
-        #     # print(unique_cached_negs_ids)
-        #     return unique_cached_negs_ids[:num_inter]
+        if not sampled_negs_ids:
+            # print(unique_cached_negs_ids)
+            return unique_cached_negs_ids[:num_inter]
 
-        # return unique_cached_negs_ids[sampled_negs_ids]
+        return unique_cached_negs_ids[sampled_negs_ids]
 
 # Compute cosine similarity between candidate items
 def cosine_similarity_matrix(E):
